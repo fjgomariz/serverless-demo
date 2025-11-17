@@ -1,26 +1,41 @@
 import logging
 import os
+import json
 import azure.functions as func
 from azure.identity import DefaultAzureCredential
 from azure.cosmos import CosmosClient, exceptions
 from datetime import datetime
 
 
-def main(myblob: func.InputStream):
+def main(event: func.EventGridEvent):
     """
-    Azure Function triggered by blob storage.
+    Azure Function triggered by Event Grid for blob storage events.
     Writes the blob filename to CosmosDB using Managed Identity.
     
     Args:
-        myblob: The blob that triggered the function
+        event: The Event Grid event that triggered the function
     """
-    logging.info(f"Python blob trigger function processed blob \n"
-                 f"Name: {myblob.name}\n"
-                 f"Blob Size: {myblob.length} bytes")
+    # Parse the Event Grid event
+    event_data = event.get_json()
+    
+    # Extract blob information from the event
+    blob_url = event_data.get('url', '')
+    blob_size = event_data.get('contentLength', 0)
+    
+    logging.info(f"Python Event Grid trigger function processed event \n"
+                 f"Event Type: {event.event_type}\n"
+                 f"Subject: {event.subject}\n"
+                 f"Blob URL: {blob_url}\n"
+                 f"Blob Size: {blob_size} bytes")
     
     try:
-        # Extract just the filename from the full blob path
-        blob_name = myblob.name.split('/')[-1]
+        # Extract blob path from the subject (format: /blobServices/default/containers/{container}/blobs/{path})
+        subject_parts = event.subject.split('/blobs/')
+        if len(subject_parts) < 2:
+            raise ValueError(f"Invalid subject format: {event.subject}")
+        
+        blob_path = subject_parts[1]
+        blob_name = blob_path.split('/')[-1]
         
         # Get configuration from environment variables
         cosmos_endpoint = os.environ.get('CosmosDBEndpoint')
@@ -44,9 +59,11 @@ def main(myblob: func.InputStream):
         document = {
             'id': blob_name,
             'fileName': blob_name,
-            'blobPath': myblob.name,
-            'blobSize': myblob.length,
-            'timestamp': datetime.utcnow().isoformat()
+            'blobPath': blob_path,
+            'blobUrl': blob_url,
+            'blobSize': blob_size,
+            'timestamp': datetime.utcnow().isoformat(),
+            'eventType': event.event_type
         }
         
         # Insert or update the document
@@ -58,5 +75,5 @@ def main(myblob: func.InputStream):
         logging.error(f"CosmosDB error: {e.status_code} - {e.message}")
         raise
     except Exception as e:
-        logging.error(f"Error processing blob: {str(e)}")
+        logging.error(f"Error processing Event Grid event: {str(e)}")
         raise

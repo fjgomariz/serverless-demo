@@ -2,11 +2,9 @@
   "scriptFile": "__init__.py",
   "bindings": [
     {
-      "name": "myblob",
-      "type": "blobTrigger",
-      "direction": "in",
-      "path": "files/{name}",
-      "connection": "BlobStorageConnection"
+      "name": "event",
+      "type": "eventGridTrigger",
+      "direction": "in"
     }
   ]
 }
