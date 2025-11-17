@@ -1,0 +1,10 @@
+.git*
+.vscode
+.venv
+.env
+__pycache__
+*.pyc
+.python_version
+local.settings.json
+test
+.DS_Store
