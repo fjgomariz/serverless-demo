@@ -5,8 +5,7 @@ import azure.functions as func
 from azure.identity import DefaultAzureCredential
 from azure.cosmos import CosmosClient, exceptions
 from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeDocumentRequest, AnalyzeResult
-from azure.core.credentials import AzureKeyCredential
+from azure.ai.documentintelligence.models import AnalyzeResult
 from datetime import datetime
 import requests
 
