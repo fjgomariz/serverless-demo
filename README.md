@@ -7,13 +7,15 @@ Azure Function with Event Grid Trigger for Blob Storage and CosmosDB Integration
 This is a Python Azure Function that:
 - Triggers automatically when a new file is uploaded to a specific blob storage container via Event Grid
 - Reads the blob file information from the Event Grid event
-- Writes the file metadata to a CosmosDB collection named `files`
-- Uses Managed Identities for secure authentication to CosmosDB
+- Downloads the blob and analyzes it with Azure Document Intelligence to extract receipt information
+- Writes the file metadata and extracted receipt data to a CosmosDB collection named `files`
+- Uses Managed Identities for secure authentication to CosmosDB, Storage, and Document Intelligence
 - Compatible with Azure Functions Flex Consumption plan
 
 ## Architecture
 
 - **Trigger**: Event Grid (for Blob Storage events on container: `files`)
+- **Processing**: Azure Document Intelligence (for receipt data extraction)
 - **Target**: CosmosDB (database: `serverless-demo`, collection: `files`)
 - **Authentication**: Azure Managed Identity (no connection strings required)
 
@@ -23,11 +25,14 @@ This is a Python Azure Function that:
 - Azure Function App (Python 3.9+) - **Flex Consumption plan supported**
 - Azure Storage Account
 - Azure Event Grid System Topic for the Storage Account
+- Azure Document Intelligence resource (for receipt analysis)
 - Azure CosmosDB account with:
   - Database: `serverless-demo`
   - Container: `files` (with partition key `/id`)
 - Managed Identity enabled on the Function App with:
   - Cosmos DB Built-in Data Contributor role on the CosmosDB account
+  - Storage Blob Data Reader role on the Storage Account (for blob downloads)
+  - Cognitive Services User role on the Document Intelligence resource
 
 ## Project Structure
 
@@ -51,8 +56,9 @@ Set the following application settings in your Azure Function App:
 |---------|-------------|---------|
 | `CosmosDBEndpoint` | CosmosDB account endpoint | `https://mycosmosdb.documents.azure.com:443/` |
 | `CosmosDBDatabase` | CosmosDB database name | `serverless-demo` |
+| `DocumentIntelligenceEndpoint` | Document Intelligence service endpoint (optional) | `https://mydocint.cognitiveservices.azure.com/` |
 
-**Note**: With Event Grid trigger, you no longer need `BlobStorageConnection` settings.
+**Note**: With Event Grid trigger, you no longer need `BlobStorageConnection` settings. The `DocumentIntelligenceEndpoint` is optional - if not provided, receipt analysis will be skipped and only basic file metadata will be stored.
 
 ### Managed Identity Setup
 
@@ -69,6 +75,22 @@ Set the following application settings in your Azure Function App:
      --scope "/" \
      --principal-id <managed-identity-principal-id> \
      --role-definition-id 00000000-0000-0000-0000-000000000002
+   ```
+
+3. **Grant Storage Access** (required for blob downloads):
+   ```bash
+   az role assignment create \
+     --role "Storage Blob Data Reader" \
+     --assignee <managed-identity-principal-id> \
+     --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Storage/storageAccounts/<storage-account-name>
+   ```
+
+4. **Grant Document Intelligence Access**:
+   ```bash
+   az role assignment create \
+     --role "Cognitive Services User" \
+     --assignee <managed-identity-principal-id> \
+     --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.CognitiveServices/accounts/<document-intelligence-account-name>
    ```
 
 ### Event Grid Setup
@@ -111,7 +133,8 @@ Create an Event Grid subscription to trigger the function on blob creation:
        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
        "FUNCTIONS_WORKER_RUNTIME": "python",
        "CosmosDBEndpoint": "https://yourcosmosdb.documents.azure.com:443/",
-       "CosmosDBDatabase": "serverless-demo"
+       "CosmosDBDatabase": "serverless-demo",
+       "DocumentIntelligenceEndpoint": "https://yourdocint.cognitiveservices.azure.com/"
      }
    }
    ```
@@ -139,8 +162,12 @@ When a new blob is added to the `files` container:
 1. The blob creation triggers an Event Grid event
 2. The Event Grid subscription delivers the event to the Azure Function
 3. The function extracts blob information from the event data
-4. It connects to CosmosDB using Managed Identity
-5. It creates/updates a document in the `files` collection with:
+4. If Document Intelligence is configured:
+   - Downloads the blob content using Managed Identity
+   - Analyzes the receipt using Document Intelligence prebuilt-receipt model
+   - Extracts purchase date, merchant name, and total amount
+5. It connects to CosmosDB using Managed Identity
+6. It creates/updates a document in the `files` collection with:
    - `id`: The blob filename
    - `fileName`: The blob filename
    - `blobPath`: Relative path to the blob within the container
@@ -148,6 +175,9 @@ When a new blob is added to the `files` container:
    - `blobSize`: Size in bytes
    - `timestamp`: UTC timestamp when processed
    - `eventType`: The Event Grid event type (e.g., Microsoft.Storage.BlobCreated)
+   - `purchaseDate`: Extracted purchase date from receipt (null if not available)
+   - `merchantName`: Extracted merchant/supermarket name from receipt (null if not available)
+   - `totalAmount`: Extracted total amount from receipt (null if not available)
 
 ## Security
 

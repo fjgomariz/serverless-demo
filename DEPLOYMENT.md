@@ -18,6 +18,7 @@ LOCATION="eastus"
 STORAGE_ACCOUNT="serverlessdemostore"
 FUNCTION_APP="serverless-demo-func"
 COSMOSDB_ACCOUNT="serverless-demo-cosmos"
+DOCUMENT_INTELLIGENCE_ACCOUNT="serverless-demo-docint"
 
 # Create resource group
 az group create --name $RESOURCE_GROUP --location $LOCATION
@@ -75,6 +76,15 @@ az functionapp create \
 #   --name $FUNCTION_APP \
 #   --storage-account $STORAGE_ACCOUNT \
 #   --os-type Linux
+
+# Create Document Intelligence account
+az cognitiveservices account create \
+  --name $DOCUMENT_INTELLIGENCE_ACCOUNT \
+  --resource-group $RESOURCE_GROUP \
+  --kind FormRecognizer \
+  --sku S0 \
+  --location $LOCATION \
+  --yes
 ```
 
 ### 3. Enable Managed Identity
@@ -102,9 +112,29 @@ az cosmosdb sql role assignment create \
   --scope "/" \
   --principal-id $PRINCIPAL_ID \
   --role-definition-id 00000000-0000-0000-0000-000000000002
-```
 
-**Note**: With Event Grid trigger, you no longer need to assign Storage Blob Data Reader role to the Function App's Managed Identity.
+# Grant Storage Blob Data Reader role (required for blob downloads)
+STORAGE_ID=$(az storage account show \
+  --name $STORAGE_ACCOUNT \
+  --resource-group $RESOURCE_GROUP \
+  --query id -o tsv)
+
+az role assignment create \
+  --role "Storage Blob Data Reader" \
+  --assignee $PRINCIPAL_ID \
+  --scope $STORAGE_ID
+
+# Grant Document Intelligence access
+DOCINT_ID=$(az cognitiveservices account show \
+  --name $DOCUMENT_INTELLIGENCE_ACCOUNT \
+  --resource-group $RESOURCE_GROUP \
+  --query id -o tsv)
+
+az role assignment create \
+  --role "Cognitive Services User" \
+  --assignee $PRINCIPAL_ID \
+  --scope $DOCINT_ID
+```
 
 ### 5. Configure Application Settings
 
@@ -115,13 +145,20 @@ COSMOS_ENDPOINT=$(az cosmosdb show \
   --resource-group $RESOURCE_GROUP \
   --query documentEndpoint -o tsv)
 
+# Get Document Intelligence endpoint
+DOCINT_ENDPOINT=$(az cognitiveservices account show \
+  --name $DOCUMENT_INTELLIGENCE_ACCOUNT \
+  --resource-group $RESOURCE_GROUP \
+  --query properties.endpoint -o tsv)
+
 # Configure Function App settings
 az functionapp config appsettings set \
   --name $FUNCTION_APP \
   --resource-group $RESOURCE_GROUP \
   --settings \
     "CosmosDBEndpoint=$COSMOS_ENDPOINT" \
-    "CosmosDBDatabase=serverless-demo"
+    "CosmosDBDatabase=serverless-demo" \
+    "DocumentIntelligenceEndpoint=$DOCINT_ENDPOINT"
 ```
 
 ### 6. Create Event Grid Subscription

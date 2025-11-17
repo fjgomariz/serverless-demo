@@ -4,6 +4,7 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "CosmosDBEndpoint": "https://yourcosmosdb.documents.azure.com:443/",
-    "CosmosDBDatabase": "serverless-demo"
+    "CosmosDBDatabase": "serverless-demo",
+    "DocumentIntelligenceEndpoint": "https://yourdocint.cognitiveservices.azure.com/"
   }
 }
