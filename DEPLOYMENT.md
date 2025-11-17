@@ -53,16 +53,28 @@ az cosmosdb sql container create \
   --name files \
   --partition-key-path "/id"
 
-# Create Function App
+# Create Function App (Flex Consumption or Consumption plan)
+# For Flex Consumption (recommended):
 az functionapp create \
   --resource-group $RESOURCE_GROUP \
-  --consumption-plan-location $LOCATION \
-  --runtime python \
-  --runtime-version 3.9 \
-  --functions-version 4 \
   --name $FUNCTION_APP \
   --storage-account $STORAGE_ACCOUNT \
-  --os-type Linux
+  --runtime python \
+  --runtime-version 3.11 \
+  --functions-version 4 \
+  --os-type Linux \
+  --flexconsumption-location $LOCATION
+
+# OR for standard Consumption plan:
+# az functionapp create \
+#   --resource-group $RESOURCE_GROUP \
+#   --consumption-plan-location $LOCATION \
+#   --runtime python \
+#   --runtime-version 3.9 \
+#   --functions-version 4 \
+#   --name $FUNCTION_APP \
+#   --storage-account $STORAGE_ACCOUNT \
+#   --os-type Linux
 ```
 
 ### 3. Enable Managed Identity
@@ -83,12 +95,6 @@ PRINCIPAL_ID=$(az functionapp identity show \
 ### 4. Assign Permissions
 
 ```bash
-# Grant Storage Blob Data Reader role
-az role assignment create \
-  --assignee $PRINCIPAL_ID \
-  --role "Storage Blob Data Reader" \
-  --scope /subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT
-
 # Grant CosmosDB access (built-in data contributor role)
 az cosmosdb sql role assignment create \
   --account-name $COSMOSDB_ACCOUNT \
@@ -98,15 +104,11 @@ az cosmosdb sql role assignment create \
   --role-definition-id 00000000-0000-0000-0000-000000000002
 ```
 
+**Note**: With Event Grid trigger, you no longer need to assign Storage Blob Data Reader role to the Function App's Managed Identity.
+
 ### 5. Configure Application Settings
 
 ```bash
-# Get storage account URL
-STORAGE_URL=$(az storage account show \
-  --name $STORAGE_ACCOUNT \
-  --resource-group $RESOURCE_GROUP \
-  --query primaryEndpoints.blob -o tsv)
-
 # Get CosmosDB endpoint
 COSMOS_ENDPOINT=$(az cosmosdb show \
   --name $COSMOSDB_ACCOUNT \
@@ -118,13 +120,40 @@ az functionapp config appsettings set \
   --name $FUNCTION_APP \
   --resource-group $RESOURCE_GROUP \
   --settings \
-    "BlobStorageConnection__blobServiceUri=$STORAGE_URL" \
-    "BlobStorageConnection__credential=managedidentity" \
     "CosmosDBEndpoint=$COSMOS_ENDPOINT" \
     "CosmosDBDatabase=serverless-demo"
 ```
 
-### 6. Deploy the Function
+### 6. Create Event Grid Subscription
+
+Create an Event Grid subscription to send blob storage events to your function:
+
+```bash
+# Get Function App resource ID
+FUNCTION_RESOURCE_ID=$(az functionapp show \
+  --name $FUNCTION_APP \
+  --resource-group $RESOURCE_GROUP \
+  --query id -o tsv)
+
+# Get Storage Account resource ID
+STORAGE_RESOURCE_ID=$(az storage account show \
+  --name $STORAGE_ACCOUNT \
+  --resource-group $RESOURCE_GROUP \
+  --query id -o tsv)
+
+# Create Event Grid subscription
+az eventgrid event-subscription create \
+  --name blob-created-subscription \
+  --source-resource-id $STORAGE_RESOURCE_ID \
+  --endpoint-type azurefunction \
+  --endpoint "${FUNCTION_RESOURCE_ID}/functions/BlobTriggerFunction" \
+  --included-event-types Microsoft.Storage.BlobCreated \
+  --subject-begins-with /blobServices/default/containers/files/
+```
+
+**Important**: The Event Grid subscription filters events to only trigger on blob creation in the `files` container.
+
+### 7. Deploy the Function
 
 ```bash
 # Deploy using Azure Functions Core Tools
@@ -145,7 +174,7 @@ az storage blob upload \
   --file test.txt
 ```
 
-Check the CosmosDB collection for the new document:
+The Event Grid event should trigger the function automatically. Check the CosmosDB collection for the new document:
 
 ```bash
 az cosmosdb sql container query \
@@ -168,14 +197,36 @@ func azure functionapp logstream $FUNCTION_APP
 # Navigate to: Function App > Functions > BlobTriggerFunction > Monitor
 ```
 
+Check Event Grid subscription delivery status:
+
+```bash
+# View Event Grid metrics in Azure Portal
+# Navigate to: Storage Account > Events > Event Subscriptions > blob-created-subscription
+```
+
 ## Troubleshooting
 
 If the function doesn't trigger:
-1. Check Managed Identity is enabled
-2. Verify role assignments are correct
-3. Check application settings
-4. Review function logs for errors
-5. Ensure blob container name is 'files'
+1. Check Managed Identity is enabled on the Function App
+2. Verify CosmosDB role assignment is correct
+3. Check application settings (CosmosDBEndpoint, CosmosDBDatabase)
+4. **Verify Event Grid subscription exists and is active**
+5. **Check Event Grid subscription subject filter** (`/blobServices/default/containers/files/`)
+6. **Ensure event type filter includes** `Microsoft.Storage.BlobCreated`
+7. Review function logs for errors
+8. Check Event Grid delivery metrics in Azure Portal
+9. Ensure the blob is uploaded to the `files` container
+
+### Event Grid Subscription Validation
+
+Verify the Event Grid subscription is working:
+
+```bash
+# List Event Grid subscriptions for the storage account
+az eventgrid event-subscription list \
+  --source-resource-id $STORAGE_RESOURCE_ID \
+  --query "[].{name:name, endpoint:destination.endpointType, status:provisioningState}"
+```
 
 ## Cleanup
 
