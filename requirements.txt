@@ -1,0 +1,8 @@
+# Azure Functions
+azure-functions
+
+# Azure Identity for Managed Identity
+azure-identity
+
+# Azure Cosmos DB
+azure-cosmos
