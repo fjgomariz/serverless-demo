@@ -6,6 +6,3 @@ azure-identity
 
 # Azure Cosmos DB
 azure-cosmos
-
-# Azure Document Intelligence
-azure-ai-documentintelligence
