@@ -18,6 +18,7 @@ LOCATION="eastus"
 STORAGE_ACCOUNT="serverlessdemostore"
 FUNCTION_APP="serverless-demo-func"
 COSMOSDB_ACCOUNT="serverless-demo-cosmos"
+DOCUMENT_INTELLIGENCE="serverless-demo-docai"
 
 # Create resource group
 az group create --name $RESOURCE_GROUP --location $LOCATION
@@ -52,6 +53,15 @@ az cosmosdb sql container create \
   --database-name serverless-demo \
   --name files \
   --partition-key-path "/id"
+
+# Create Document Intelligence resource
+az cognitiveservices account create \
+  --name $DOCUMENT_INTELLIGENCE \
+  --resource-group $RESOURCE_GROUP \
+  --kind FormRecognizer \
+  --sku S0 \
+  --location $LOCATION \
+  --yes
 
 # Create Function App (Flex Consumption or Consumption plan)
 # For Flex Consumption (recommended):
@@ -102,6 +112,18 @@ az cosmosdb sql role assignment create \
   --scope "/" \
   --principal-id $PRINCIPAL_ID \
   --role-definition-id 00000000-0000-0000-0000-000000000002
+
+# Get Document Intelligence resource ID
+DOC_INTELLIGENCE_ID=$(az cognitiveservices account show \
+  --name $DOCUMENT_INTELLIGENCE \
+  --resource-group $RESOURCE_GROUP \
+  --query id -o tsv)
+
+# Grant Document Intelligence access
+az role assignment create \
+  --role "Cognitive Services User" \
+  --assignee $PRINCIPAL_ID \
+  --scope $DOC_INTELLIGENCE_ID
 ```
 
 **Note**: With Event Grid trigger, you no longer need to assign Storage Blob Data Reader role to the Function App's Managed Identity.
@@ -115,13 +137,20 @@ COSMOS_ENDPOINT=$(az cosmosdb show \
   --resource-group $RESOURCE_GROUP \
   --query documentEndpoint -o tsv)
 
+# Get Document Intelligence endpoint
+DOC_INTELLIGENCE_ENDPOINT=$(az cognitiveservices account show \
+  --name $DOCUMENT_INTELLIGENCE \
+  --resource-group $RESOURCE_GROUP \
+  --query properties.endpoint -o tsv)
+
 # Configure Function App settings
 az functionapp config appsettings set \
   --name $FUNCTION_APP \
   --resource-group $RESOURCE_GROUP \
   --settings \
     "CosmosDBEndpoint=$COSMOS_ENDPOINT" \
-    "CosmosDBDatabase=serverless-demo"
+    "CosmosDBDatabase=serverless-demo" \
+    "DocumentIntelligenceEndpoint=$DOC_INTELLIGENCE_ENDPOINT"
 ```
 
 ### 6. Create Event Grid Subscription
