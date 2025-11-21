@@ -7,8 +7,12 @@ Azure Function with Event Grid Trigger for Blob Storage and CosmosDB Integration
 This is a Python Azure Function that:
 - Triggers automatically when a new file is uploaded to a specific blob storage container via Event Grid
 - Reads the blob file information from the Event Grid event
-- Writes the file metadata to a CosmosDB collection named `files`
-- Uses Managed Identities for secure authentication to CosmosDB
+- **Analyzes purchase receipts using Azure Document Intelligence to extract:**
+  - **Purchase date (fecha de compra)**
+  - **Supermarket name (supermercado)**
+  - **Total amount (importe total)**
+- Writes the file metadata and extracted receipt information to a CosmosDB collection named `files`
+- Uses Managed Identities for secure authentication to CosmosDB and Document Intelligence
 - Compatible with Azure Functions Flex Consumption plan
 
 ## Architecture
@@ -26,8 +30,10 @@ This is a Python Azure Function that:
 - Azure CosmosDB account with:
   - Database: `serverless-demo`
   - Container: `files` (with partition key `/id`)
+- **Azure AI Document Intelligence resource** (for receipt processing)
 - Managed Identity enabled on the Function App with:
   - Cosmos DB Built-in Data Contributor role on the CosmosDB account
+  - **Cognitive Services User role on the Document Intelligence resource**
 
 ## Project Structure
 
@@ -51,8 +57,10 @@ Set the following application settings in your Azure Function App:
 |---------|-------------|---------|
 | `CosmosDBEndpoint` | CosmosDB account endpoint | `https://mycosmosdb.documents.azure.com:443/` |
 | `CosmosDBDatabase` | CosmosDB database name | `serverless-demo` |
+| `DocumentIntelligenceEndpoint` | Document Intelligence endpoint | `https://mydocai.cognitiveservices.azure.com/` |
 
 **Note**: With Event Grid trigger, you no longer need `BlobStorageConnection` settings.
+**Note**: If `DocumentIntelligenceEndpoint` is not configured, the function will skip receipt analysis and only save blob metadata.
 
 ### Managed Identity Setup
 
@@ -69,6 +77,14 @@ Set the following application settings in your Azure Function App:
      --scope "/" \
      --principal-id <managed-identity-principal-id> \
      --role-definition-id 00000000-0000-0000-0000-000000000002
+   ```
+
+3. **Grant Document Intelligence Access**:
+   ```bash
+   az role assignment create \
+     --role "Cognitive Services User" \
+     --assignee <managed-identity-principal-id> \
+     --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.CognitiveServices/accounts/<document-intelligence-name>
    ```
 
 ### Event Grid Setup
@@ -111,7 +127,8 @@ Create an Event Grid subscription to trigger the function on blob creation:
        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
        "FUNCTIONS_WORKER_RUNTIME": "python",
        "CosmosDBEndpoint": "https://yourcosmosdb.documents.azure.com:443/",
-       "CosmosDBDatabase": "serverless-demo"
+       "CosmosDBDatabase": "serverless-demo",
+       "DocumentIntelligenceEndpoint": "https://yourdocumentintelligence.cognitiveservices.azure.com/"
      }
    }
    ```
@@ -139,8 +156,12 @@ When a new blob is added to the `files` container:
 1. The blob creation triggers an Event Grid event
 2. The Event Grid subscription delivers the event to the Azure Function
 3. The function extracts blob information from the event data
-4. It connects to CosmosDB using Managed Identity
-5. It creates/updates a document in the `files` collection with:
+4. **If Document Intelligence is configured, it analyzes the receipt to extract:**
+   - **Purchase date** from the receipt
+   - **Supermarket/merchant name**
+   - **Total amount**
+5. It connects to CosmosDB using Managed Identity
+6. It creates/updates a document in the `files` collection with:
    - `id`: The blob filename
    - `fileName`: The blob filename
    - `blobPath`: Relative path to the blob within the container
@@ -148,6 +169,9 @@ When a new blob is added to the `files` container:
    - `blobSize`: Size in bytes
    - `timestamp`: UTC timestamp when processed
    - `eventType`: The Event Grid event type (e.g., Microsoft.Storage.BlobCreated)
+   - **`purchaseDate`**: Purchase date extracted from receipt (if available)
+   - **`supermarket`**: Supermarket/merchant name extracted from receipt (if available)
+   - **`totalAmount`**: Total amount extracted from receipt (if available)
 
 ## Security
 

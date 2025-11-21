@@ -6,3 +6,6 @@ azure-identity
 
 # Azure Cosmos DB
 azure-cosmos
+
+# Azure AI Document Intelligence (formerly Form Recognizer)
+azure-ai-formrecognizer
