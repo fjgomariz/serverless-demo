@@ -4,10 +4,11 @@ import azure.functions as func
 from azure.identity import DefaultAzureCredential
 from azure.cosmos import CosmosClient, exceptions
 from azure.ai.formrecognizer import DocumentAnalysisClient
-from datetime import datetime
+from azure.core.credentials import TokenCredential
+from datetime import datetime, date
 
 
-def analyze_receipt(blob_url: str, document_intelligence_endpoint: str, credential) -> dict:
+def analyze_receipt(blob_url: str, document_intelligence_endpoint: str, credential: TokenCredential) -> dict:
     """
     Analyze a receipt using Azure Document Intelligence.
     
@@ -50,7 +51,7 @@ def analyze_receipt(blob_url: str, document_intelligence_endpoint: str, credenti
             # Extract transaction date (purchase date)
             if fields.get("TransactionDate"):
                 transaction_date = fields["TransactionDate"].value
-                if hasattr(transaction_date, 'isoformat'):
+                if isinstance(transaction_date, (date, datetime)):
                     result['purchaseDate'] = transaction_date.isoformat()
                 else:
                     result['purchaseDate'] = str(transaction_date)
@@ -64,7 +65,7 @@ def analyze_receipt(blob_url: str, document_intelligence_endpoint: str, credenti
             logging.warning("No receipt documents found in the analysis result")
 
     except Exception as e:
-        logging.error(f"Error analyzing receipt with Document Intelligence: {str(e)}")
+        logging.error(f"Error analyzing receipt with Document Intelligence for blob {blob_url}: {str(e)}")
         # Don't raise the exception - we still want to save the blob metadata even if analysis fails
 
     return result
